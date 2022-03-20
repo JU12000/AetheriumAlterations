@@ -11,6 +11,8 @@ ReferenceAlias Property AATransmutationStatsChest Auto
 ReferenceAlias Property AATransmutationVisualChest Auto
 ReferenceAlias Property PlayerRef Auto
 
+FormList[] Property AATransmutationValidArmorAddonRacesLists Auto
+
 ; Armor arrays: Relationally linked by index
 ReferenceAlias[] Property AATransmutationResultArmors Auto ; Key Array
 ReferenceAlias[] Property AATransmutationStatsArmors Auto
@@ -26,6 +28,10 @@ ReferenceAlias[] Property AATransmutationVisualWeapons Auto
 Int[] Property ResultArmorRelationalArraySlotMasks Auto
 Keyword[] Property ResultArmorRelationalArrayKeywords Auto
 ReferenceAlias[] Property ResultArmorRelationalArrayArmors Auto ; Key Array
+
+; Arrays used to store mathing ArmorAddons: Relationally linked by index
+ArmorAddon[] Property ArmorAddonRelationalArrayArmorAddons Auto
+ReferenceAlias[] Property ArmorAddonRelationalArrayArmors Auto ; Key Array
 
 ;/ Called when the game is loaded,
 refreshes transmutations as settings are not persistant across sessions /;
@@ -104,6 +110,8 @@ EndFunction
 ;/ the valid transmutation result and notifies the AATransmutationButton of state
 ;/ changes. /;
 Function UpdateTransmutationConditions()
+	LockAllChests(True)
+
 	If ChestItemsMatches(1, 1, 0)
 		Debug.Trace(\
 			"AADebug UpdateTransmutationConditions(): Valid chest configuration 1,1,0"\
@@ -119,6 +127,8 @@ Function UpdateTransmutationConditions()
 			AACurrentTransmutationResult.ForceRefTo(result.GetReference())
 
 			(AATransmutationButton as AATransmutationButtonManager).Open()
+
+			LockAllChests()
 			Return
 		EndIf
 
@@ -152,11 +162,15 @@ Function UpdateTransmutationConditions()
 			AACurrentTransmutationResult.ForceRefTo(result.GetReference())
 
 			(AATransmutationButton as AATransmutationButtonManager).Open()
+
+			LockAllChests()
 			Return
 		EndIf
 	EndIf
 
 	(AATransmutationButton as AATransmutationButtonManager).Close()
+
+	LockAllChests()
 EndFunction
 
 ReferenceAlias Function CalculateCurrentTransmutationResultIfAny()
@@ -222,7 +236,7 @@ ReferenceAlias Function CalculateCurrentTransmutationResultIfAny()
 		) != None
 			Debug.Trace(\
 				"AADebug CalculateCurrentTransmutationresultIfAny(): "\
-				+ "The weapon in statsChest is the result of a previous transmutation"\
+				+ "The armor in statsChest is the result of a previous transmutation"\
 			)
 
 			Return None
@@ -232,7 +246,7 @@ ReferenceAlias Function CalculateCurrentTransmutationResultIfAny()
 		)
 			Debug.Trace(\
 				"AADebug CalculateCurrentTransmutationresultIfAny(): "\
-				+ "The weapon in visualChest is the result of a previous transmutation"\
+				+ "The armor in visualChest is the result of a previous transmutation"\
 			) != None
 
 			Return None
@@ -252,20 +266,51 @@ ReferenceAlias Function CalculateCurrentTransmutationResultIfAny()
 			Return None
 		EndIf
 
-		Return GetAliasInArrayFromKeywordAndSlotMaskIfExists(\
+		ArmorAddon[] matchingArmorAddons = MatchArmorAddons(visualForm as Armor)
+
+		Int i = 0
+		While i < matchingArmorAddons.Length
+			If !matchingArmorAddons[i]
+				Debug.Trace(\
+					"AADebug CalculateCurrentTransmutationResultIfAny(): The armor in"\
+					+ " visualChest does not have valid armor addons for transmutation."\
+				)
+
+				Return None
+			EndIf
+
+			i += 1
+		EndWhile
+
+		ReferenceAlias result = GetAliasInArrayFromKeywordAndSlotMaskIfExists(\
 			ResultArmorRelationalArrayArmors,\
 			ResultArmorRelationalArraySlotMasks,\
 			resultKeyword,\
 			(statsForm as Armor).GetSlotMask()\
 		)
+
+		If result
+			i = 0
+			Int j = 0
+			While i < ArmorAddonRelationalArrayArmors.Length\
+			&& j < matchingArmorAddons.Length
+				If ArmorAddonRelationalArrayArmors[i].GetReference() == result.GetReference()
+					ArmorAddonRelationalArrayArmorAddons[i] = matchingArmorAddons[j]
+
+					j += 1
+				EndIf
+
+				i += 1
+			EndWhile
+		EndIf
+
+		Return result
 	EndIf
 EndFunction
 
 ; Determine which transmutation method to call.
 Function PreTransmute()
-	AATransmutationStatsChest.GetReference().BlockActivation(True)
-	AATransmutationVisualChest.GetReference().BlockActivation(True)
-	AATransmutationResultChest.GetReference().BlockActivation(True)
+	LockAllChests(True)
 
 	If ChestItemsMatches(1, 1, 0)
 		Debug.Trace(\
@@ -321,9 +366,7 @@ Function PreTransmute()
 		)
 	EndIf
 
-	AATransmutationStatsChest.GetReference().BlockActivation(False)
-	AATransmutationVisualChest.GetReference().BlockActivation(False)
-	AATransmutationResultChest.GetReference().BlockActivation(False)
+	LockAllChests()
 EndFunction
 
 ;/ Checks that the number of items in each chest corresponds to the passed
@@ -336,6 +379,18 @@ Bool Function ChestItemsMatches(Int statsChestItems, Int visualChestItems, Int r
 	EndIf
 
 	Return False
+EndFunction
+
+Function LockAllChests(Bool lock = False)
+	AATransmutationStatsChest.GetReference().Lock(lock)
+	AATransmutationVisualChest.GetReference().Lock(lock)
+	AATransmutationResultChest.GetReference().Lock(lock)
+
+	If lock
+		AATransmutationStatsChest.GetReference().SetLockLevel(255)
+		AATransmutationVisualChest.GetReference().SetLockLevel(255)
+		AATransmutationResultChest.GetReference().SetLockLevel(255)
+	EndIf
 EndFunction
 
 Function Transmute(ReferenceAlias result, ReferenceAlias[] targetStatsArray, ReferenceAlias[] targetVisualArray, ReferenceAlias[] targetResultArray)
@@ -542,64 +597,52 @@ Function ApplyArmorTransmutation(Armor statsArmor, Armor visualArmor, Armor resu
 	resultArmor.SetEnchantment(statsArmor.GetEnchantment())
 
 	Debug.Trace("AADebug: Applying ArmorAddon visual updates")
+	ArmorAddon[] matchingArmorAddons = new ArmorAddon[4]
 	Int i = 0
-	While i < 4
+	Int j = 0
+	While i < ArmorAddonRelationalArrayArmors.Length && j < matchingArmorAddons.Length
+		If ArmorAddonRelationalArrayArmors[i].GetReference().GetBaseObject() as Armor == resultArmor
+			matchingArmorAddons[j] = ArmorAddonRelationalArrayArmorAddons[i]
+			Debug.Trace(\
+				"AADebug: Assigning " + ArmorAddonRelationalArrayArmorAddons[i]\
+				+ " to result armor slot " + j\
+			)
+
+			j += 1
+		EndIf
+
+		i += 1
+	EndWhile
+
+	i = 0
+	While i < matchingArmorAddons.Length
 		ArmorAddon resultAddon = resultArmor.GetNthArmorAddon(i)
 
-		Int numArmorAddons = visualArmor.GetNumArmorAddons()
-		While numArmorAddons > 0
-			ArmorAddon visualAddon = visualArmor.GetNthArmorAddon(numArmorAddons - 1)
-			Debug.Trace("AADebug: statsAddon: " + visualAddon)
+		resultAddon.SetModelPath(\
+			matchingArmorAddons[i].GetModelPath(False, False),\
+			False,\
+			False\
+		)
+		resultAddon.SetModelPath(\
+			matchingArmorAddons[i].GetModelPath(False, True),\
+			False,\
+			True\
+		)
+		resultAddon.SetModelPath(\
+			matchingArmorAddons[i].GetModelPath(True, False),\
+			True,\
+			False\
+		)
+		resultAddon.SetModelPath(\
+			matchingArmorAddons[i].GetModelPath(True, True),\
+			True,\
+			True\
+		)
 
-			Int resultRaces = resultAddon.GetNumAdditionalRaces()
-			Int visualRaces = visualAddon.GetNumAdditionalRaces()
-			If visualRaces > resultRaces
+		resultAddon.SetSlotMask(matchingArmorAddons[i].GetSlotMask())
+		SetFootstepSet(resultAddon, GetFootstepSet(matchingArmorAddons[i]))
 
-				While (resultRaces > 0) && (visualRaces > 0)
-					If resultAddon.GetNthAdditionalRace(resultRaces - 1)\
-					== visualAddon.GetNthAdditionalRace(visualRaces - 1)
-						resultRaces -= 1
-					EndIf
-
-					visualRaces -= 1
-				EndWhile
-
-				If resultRaces == 0
-					Debug.Trace(\
-						"AADebug: Matched result ArmorAddon " + (i + 1)\
-						+ " to visual ArmorAddon " + visualAddon\
-					)
-
-					resultAddon.SetModelPath(\
-						visualAddon.GetModelPath(False, False),\
-						False,\
-						False\
-					)
-					resultAddon.SetModelPath(\
-						visualAddon.GetModelPath(False, True),\
-						False,\
-						True\
-					)
-					resultAddon.SetModelPath(\
-						visualAddon.GetModelPath(True, False),\
-						True,\
-						False\
-					)
-					resultAddon.SetModelPath(\
-						visualAddon.GetModelPath(True, True),\
-						True,\
-						True\
-					)
-
-					resultAddon.SetSlotMask(visualAddon.GetSlotMask())
-					SetFootstepSet(resultAddon, GetFootstepSet(visualAddon))
-				EndIf
-			EndIf
-
-			numArmorAddons -= 1
-		EndWhile
-
-		i+= 1
+		i += 1
 	EndWhile
 
 	Int numRemovedKeywords = RemoveAllKeywords(resultArmor)
@@ -621,6 +664,29 @@ Function ApplyArmorTransmutation(Armor statsArmor, Armor visualArmor, Armor resu
 		"AADebug: Ending ApplyArmorTransmutation(" + statsArmor + ", "\
 		+ visualArmor + ", " + resultArmor + ")"\
 	)
+EndFunction
+
+;/ Gets a valid armor addon to match to each armor addon on a transmutation
+;/ armor. Short circuits if any armor addon does not have a match. Always
+;/ returns an array of ArmorAddon[] whose values may be None. /;
+ArmorAddon[] Function MatchArmorAddons(Armor targetArmor)
+	ArmorAddon[] matchingArmorAddons = new ArmorAddon[4]
+
+	Int i = 0
+	While i < matchingArmorAddons.Length
+		matchingArmorAddons[i] = GetValidArmorAddonIfExists(\
+			AATransmutationValidArmorAddonRacesLists[i],\
+			targetArmor\
+		)
+
+		If matchingArmorAddons[i] == None
+			Return matchingArmorAddons
+		EndIf
+
+		i += 1
+	EndWhile
+
+	return matchingArmorAddons
 EndFunction
 
 Function ApplyWeaponTransmutation(Weapon statsWeapon, Weapon visualWeapon, Weapon resultWeapon)

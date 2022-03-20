@@ -74,6 +74,40 @@ Keyword Function GetFirstCommonKeywordInArrayIfAny(Keyword[] keywordsArray, Form
 	EndWhile
 EndFunction
 
+;/ Returns the first armor addon in targetArmor which contains every race
+;/ listed in validArmorAddonRaces. Returns None otherwise. /;
+ArmorAddon Function GetValidArmorAddonIfExists(FormList validArmorAddonRaces, Armor targetArmor) Global
+	Int numValidArmorAddonRaces = validArmorAddonRaces.GetSize()
+	Int matchedRaces = 0
+
+	Int i = 0
+	While i < targetArmor.GetNumArmorAddons()
+		ArmorAddon currentAddon = targetArmor.GetNthArmorAddon(i)
+		Int numAdditionalRaces = currentAddon.GetNumAdditionalRaces()
+
+		If numAdditionalRaces >= numValidArmorAddonRaces
+			matchedRaces = 0
+
+			Int j = 0
+			While j < numAdditionalRaces && matchedRaces != numValidArmorAddonRaces
+				If validArmorAddonRaces.HasForm(currentAddon.GetNthAdditionalRace(j))
+					matchedRaces += 1
+				EndIf
+
+				j += 1
+			EndWhile
+
+			If matchedRaces == numValidArmorAddonRaces
+				Return currentAddon
+			EndIf
+		EndIf
+
+		i += 1
+	EndWhile
+
+	Return None
+EndFunction
+
 ;/ Removes all keywords on the form and returns the total numer of keywords
 ;/ removed /;
 Int Function RemoveAllKeywords(Form targetForm) Global

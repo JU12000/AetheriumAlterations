@@ -32,7 +32,7 @@ State Opened
 			GoToState("")
 			GetReference().PlayAnimationAndWait("Trigger01", "Done")
 			(AATransmutationManagerQuest as AATransmutationManager).PreTransmute()
-			GoToState("Opened")
+			GoToState("Closed")
 		EndIf
 	EndEvent
 
